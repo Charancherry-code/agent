@@ -10,7 +10,6 @@ import {
   useNodesState,
   useEdgesState,
   Node,
-  Edge,
   Connection,
   addEdge,
 } from "reactflow";
@@ -32,31 +31,41 @@ export default function BuilderPage() {
   const params = useParams();
   const workflowId = params.id as Id<"workflows">;
 
-  // 1. Convex Hooks (Load & Save)
+  // Database Hooks
   const workflow = useQuery(api.workflows.getWorkflowById, { id: workflowId });
   const updateWorkflow = useMutation(api.workflows.updateWorkflow);
 
-  // 2. React Flow State
+  // Editor State
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
 
-  // 3. Load Initial Data from DB
+  // 1. Load Data on Startup
   useEffect(() => {
-    if (workflow?.definition) {
+    if (!workflow) return;
+
+    console.log("📥 Loading workflow from DB:", workflow.definition);
+
+    let loadedNodes = [];
+    let loadedEdges = [];
+
+    // Parse JSON from DB
+    if (workflow.definition) {
       try {
         const flow = JSON.parse(workflow.definition);
-        if (flow.nodes && flow.edges) {
-          setNodes(flow.nodes);
-          setEdges(flow.edges);
-          return;
-        }
+        if (flow.nodes) loadedNodes = flow.nodes;
+        if (flow.edges) loadedEdges = flow.edges;
       } catch (e) {
-        console.error("Failed to parse workflow", e);
+        console.error("❌ Failed to parse workflow:", e);
       }
     }
-    // Fallback if empty (New Workflow)
-    if (workflow && !workflow.definition.includes("nodes")) {
+
+    // Apply data or fall back to defaults
+    if (loadedNodes.length > 0) {
+      setNodes(loadedNodes);
+      setEdges(loadedEdges);
+    } else {
+      console.log("⚠️ DB is empty, loading default nodes.");
       setNodes([
         { id: "start-1", type: "start", position: { x: 50, y: 300 }, data: {} },
         {
@@ -66,24 +75,29 @@ export default function BuilderPage() {
           data: { label: "My Gemini Agent" },
         },
       ]);
+      setEdges([]);
     }
   }, [workflow, setNodes, setEdges]);
 
-  // 4. Handle Save
+  // 2. Save Data Function
   const handleSave = async () => {
     if (!workflowId) return;
 
-    // Serialize state to JSON
-    const flow = JSON.stringify({ nodes, edges });
+    console.log("💾 Saving nodes:", nodes);
 
-    await updateWorkflow({
-      id: workflowId,
-      definition: flow,
-    });
-    alert("Saved successfully!");
+    try {
+      const flow = JSON.stringify({ nodes, edges });
+      await updateWorkflow({
+        id: workflowId,
+        definition: flow,
+      });
+      alert("✅ Saved successfully!");
+    } catch (error) {
+      console.error("❌ Save failed:", error);
+      alert("Failed to save.");
+    }
   };
 
-  // 5. Connect Nodes (Draw lines)
   const onConnect = useCallback(
     (params: Connection) => {
       setEdges((eds) => addEdge(params, eds));
@@ -91,7 +105,6 @@ export default function BuilderPage() {
     [setEdges]
   );
 
-  // Handle Updates from Sidebar
   const onUpdateNode = useCallback(
     (id: string, newData: any) => {
       setNodes((nds) =>
@@ -118,29 +131,25 @@ export default function BuilderPage() {
 
   return (
     <div className="h-[calc(100vh-64px)] w-full flex flex-col">
-      {/* Header */}
       <div className="h-14 border-b bg-white flex items-center px-4 justify-between z-20 relative">
         <h2 className="font-semibold text-sm text-slate-700">
           {workflow?.name}
         </h2>
-        <div className="flex gap-2">
-          <button
-            onClick={handleSave}
-            className="bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm hover:bg-blue-700 transition flex items-center gap-2"
-          >
-            Save Workflow
-          </button>
-        </div>
+        <button
+          onClick={handleSave}
+          className="bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm hover:bg-blue-700 transition"
+        >
+          Save Workflow
+        </button>
       </div>
 
-      {/* Canvas */}
       <div className="flex-1 w-full bg-slate-50 relative overflow-hidden">
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
-          onConnect={onConnect} // <--- Allow connecting nodes
+          onConnect={onConnect}
           onNodeClick={(e, node) => setSelectedNode(node)}
           nodeTypes={nodeTypes}
           fitView
